@@ -1,4 +1,6 @@
 import streamlit as st
+import matplotlib.patches as patches
+import matplotlib.pyplot as plt
 
 # Пълна база данни с формати
 DATA = {
@@ -18,9 +20,8 @@ DATA = {
 
 NAMED_SIZES = {"himiya": "43x61", "плаки": "48.7x33"}
 
-st.title("🖨️ Печатен Калкулатор")
+st.title("🖨️ Печатен Калкулатор със Схема")
 
-# Форма за въвеждане на данни
 full_choice = st.selectbox("1. Избор на хартия:", list(DATA.keys()))
 
 if full_choice == "ДРУГ РАЗМЕР":
@@ -44,7 +45,60 @@ with col_h:
 turn_over = st.selectbox("5. С обръщане?", ["Не", "Да"]) == "Да"
 useful_grip = st.selectbox("6. Полезен грайфер? (Офсет)", ["Не", "Да"]) == "Да"
 
-if st.button("ИЗЧИСЛИ", type="primary"):
+def draw_matplotlib_scheme(psw, psh, best_data, is_formatting, is_turn_over, grip, sheet_type):
+    fig, ax = plt.subplots(figsize=(6, 6))
+    ax.set_xlim(0, psw)
+    ax.set_ylim(0, psh)
+    ax.set_aspect('equal')
+    
+    # Лист основа
+    sheet_rect = patches.Rectangle((0, 0), psw, psh, linewidth=1, edgecolor='black', facecolor='#f0f0f0')
+    ax.add_patch(sheet_rect)
+    
+    # Работно поле / полета
+    if not is_formatting:
+        if "плаки" in sheet_type.lower():
+            mx, my = 9, 10
+            limit_rect = patches.Rectangle((mx, my), psw - 18, psh - 20, linewidth=1, edgecolor='red', linestyle='--', facecolor='none')
+        else:
+            mx, my = 2.5, 3
+            limit_rect = patches.Rectangle((mx, my), psw - 5, psh - (grip + 3), linewidth=1, edgecolor='red', linestyle='--', facecolor='none')
+        ax.add_patch(limit_rect)
+    else:
+        mx, my = 0, 0
+
+    _, c, r, iw, ih, ex_c, ex_r, pos = best_data
+
+    def plot_half(offset_x, curr_c, m_x, m_y):
+        for row in range(r):
+            for col in range(curr_c):
+                x1 = offset_x + m_x + col*iw
+                y1 = m_y + row*ih
+                rect = patches.Rectangle((x1, y1), iw, ih, linewidth=1, edgecolor='blue', facecolor='#e1f5fe')
+                ax.add_patch(rect)
+        if ex_c > 0:
+            for row in range(ex_r):
+                for col in range(ex_c):
+                    x1 = offset_x + (curr_c*iw + m_x if pos=="right" else m_x + col*ih)
+                    y1 = m_y + (row*ih if pos=="right" else r*ih + row*iw)
+                    w_box = ih if pos=="right" else ih
+                    h_box = iw if pos=="right" else iw
+                    rect = patches.Rectangle((x1, y1), w_box, h_box, linewidth=1, edgecolor='#2e7d32', facecolor='#c8e6c9')
+                    ax.add_patch(rect)
+
+    if is_turn_over:
+        half_w = (psw - (18 if "плаки" in sheet_type.lower() else 5)) / 2
+        plot_half(mx, c, mx, my)
+        plot_half(psw / 2 + mx, c, mx, my)
+        ax.axvline(x=psw/2, color='red', linestyle='--')
+    else:
+        plot_half(mx, c, mx, my)
+
+    ax.invert_yaxis() # За да е удобно с координатите на листа
+    plt.axis('off')
+    st.pyplot(fig)
+
+if st.button("ИЗЧИСЛИ И ПОКАЖИ СХЕМА", type="primary"):
     try:
         is_formatting = "Цял лист" in print_choice
         
@@ -64,7 +118,6 @@ if st.button("ИЗЧИСЛИ", type="primary"):
         
         pw, ph = float(pw_str.replace(',', '.')), float(ph_str.replace(',', '.'))
         
-        # Логика за работно поле
         if "плаки" in full_choice.lower():
             grip_mm = 10 
         elif is_formatting:
@@ -96,6 +149,10 @@ if st.button("ИЗЧИСЛИ", type="primary"):
         st.success(f"Брой в листа: {int(best[0])}")
         area_pct = (int(best[0]) * pw * ph) / (psw_mm * psh_mm) * 100
         st.info(f"Използваема площ: {area_pct:.1f}%")
+        
+        # Рисуване на графиката
+        st.subheader("Визуализация на монтажа:")
+        draw_matplotlib_scheme(psw_mm, psh_mm, best, is_formatting, (turn_over and not is_formatting), grip_mm, full_choice)
         
     except Exception as e:
         st.error(f"Невалидни данни или грешка при изчислението: {e}")
