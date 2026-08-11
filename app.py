@@ -20,7 +20,7 @@ DATA = {
 
 NAMED_SIZES = {"himiya": "43x61", "плаки": "48.7x33"}
 
-st.title("🖨️ Печатен Калкулатор")
+st.title("🖨️ Печатен Калкулатор (Гилотинно разкрояване)")
 
 full_choice = st.selectbox("1. Избор на хартия:", list(DATA.keys()))
 
@@ -45,56 +45,38 @@ with col_h:
 turn_over = st.selectbox("5. С обръщане?", ["Не", "Да"]) == "Да"
 useful_grip = st.selectbox("6. Полезен грайфер? (Офсет)", ["Не", "Да"]) == "Да"
 
-def draw_matplotlib_scheme(psw, psh, best_data, is_formatting, is_turn_over, grip, sheet_type):
+def draw_matplotlib_scheme(psw, psh, rects, is_formatting, is_turn_over, grip, sheet_type):
     fig, ax = plt.subplots(figsize=(6, 6))
     ax.set_xlim(0, psw)
     ax.set_ylim(0, psh)
     ax.set_aspect('equal')
     
-    # Лист основа
     sheet_rect = patches.Rectangle((0, 0), psw, psh, linewidth=1, edgecolor='black', facecolor='#f0f0f0')
     ax.add_patch(sheet_rect)
     
-    # Работно поле / полета
     if not is_formatting:
         if "плаки" in sheet_type.lower():
             mx, my = 9, 10
             limit_rect = patches.Rectangle((mx, my), psw - 18, psh - 20, linewidth=1, edgecolor='red', linestyle='--', facecolor='none')
         else:
             mx, my = 2.5, 3
-            limit_rect = patches.Rectangle((mx, my), psw - 5, psh - (grip + 3), linewidth=1, edgecolor='red', linestyle='--', facecolor='none')
+            limit_rect = patches.Rectangle((mx, my), psw - 5, psh - grip, linewidth=1, edgecolor='red', linestyle='--', facecolor='none')
         ax.add_patch(limit_rect)
     else:
         mx, my = 0, 0
 
-    _, c, r, iw, ih, ex_c, ex_r, pos = best_data
-
-    def plot_half(offset_x, curr_c, m_x, m_y):
-        for row in range(r):
-            for col in range(curr_c):
-                x1 = offset_x + m_x + col*iw
-                y1 = m_y + row*ih
-                rect = patches.Rectangle((x1, y1), iw, ih, linewidth=1, edgecolor='blue', facecolor='#e1f5fe')
-                ax.add_patch(rect)
-        if ex_c > 0:
-            for row in range(ex_r):
-                for col in range(ex_c):
-                    x1 = offset_x + (curr_c*iw + m_x if pos=="right" else m_x + col*ih)
-                    y1 = m_y + (row*ih if pos=="right" else r*ih + row*iw)
-                    w_box = ih if pos=="right" else ih
-                    h_box = iw if pos=="right" else iw
-                    rect = patches.Rectangle((x1, y1), w_box, h_box, linewidth=1, edgecolor='#2e7d32', facecolor='#c8e6c9')
-                    ax.add_patch(rect)
-
     if is_turn_over:
-        half_w = (psw - (18 if "плаки" in sheet_type.lower() else 5)) / 2
-        plot_half(mx, c, mx, my)
-        plot_half(psw / 2 + mx, c, mx, my)
         ax.axvline(x=psw/2, color='red', linestyle='--')
-    else:
-        plot_half(mx, c, mx, my)
 
-    ax.invert_yaxis() # За да е удобно с координатите на листа
+    for (rx, ry, rw, rh) in rects:
+        x1 = mx + rx
+        y1 = my + ry
+        fill_color = "#e1f5fe" if rw < rh else "#c8e6c9"
+        border_color = "blue" if rw < rh else "#2e7d32"
+        rect = patches.Rectangle((x1, y1), rw, rh, linewidth=1, edgecolor=border_color, facecolor=fill_color)
+        ax.add_patch(rect)
+
+    ax.invert_yaxis()
     plt.axis('off')
     st.pyplot(fig)
 
@@ -119,40 +101,86 @@ if st.button("ИЗЧИСЛИ И ПОКАЖИ СХЕМА", type="primary"):
         pw, ph = float(pw_str.replace(',', '.')), float(ph_str.replace(',', '.'))
         
         if "плаки" in full_choice.lower():
+            lim_w = psw_mm - 18 
+            lim_h = psh_mm - 20
             grip_mm = 10 
         elif is_formatting:
+            lim_w, lim_h = psw_mm, psh_mm
             grip_mm = 0
         else:
             grip_mm = 3 if useful_grip else 10
-            
-        lim_w = psw_mm - (18 if "плаки" in full_choice.lower() else (5 if not is_formatting else 0))
-        lim_h = psh_mm - (20 if "плаки" in full_choice.lower() else ((grip_mm + 3) if not is_formatting else 0))
+            lim_w = psw_mm - 5 
+            lim_h = psh_mm - (grip_mm + 3)
 
-        def get_layout(SW, SH, IW, IH):
-            c, r = int((SW + 0.1) // IW), int((SH + 0.1) // IH)
-            total = c * r
-            rw, rh = SW - (c * IW), SH - (r * IH)
-            tR = total + (int((rw + 0.1) // IH) * int((SH + 0.1) // IW))
-            tB = total + (int((SW + 0.1) // IH) * int((rh + 0.1) // IW))
-            return (tR, c, r, IW, IH, int((rw + 0.1) // IH), int((SH + 0.1) // IW), "right") if tR >= tB else \
-                   (tB, c, r, IW, IH, int((SW + 0.1) // IH), int((rh + 0.1) // IW), "bottom")
+        def solve_guillotine(SW, SH, IW, IH):
+            memo = {}
+            def helper(w, h):
+                if w < min(IW, IH) or h < min(IW, IH):
+                    return 0, []
+                key = (round(w, 1), round(h, 1))
+                if key in memo:
+                    return memo[key]
+
+                best_cnt = 0
+                best_rects = []
+
+                if w >= IW and h >= IH:
+                    best_cnt = 1
+                    best_rects = [(0, 0, IW, IH)]
+
+                if w >= IH and h >= IW:
+                    if 1 > best_cnt:
+                        best_cnt = 1
+                        best_rects = [(0, 0, IH, IW)]
+
+                cut_x = set()
+                x = IW
+                while x < w: cut_x.add(x); x += IW
+                x = IH
+                while x < w: cut_x.add(x); x += IH
+
+                for cx in cut_x:
+                    c1, r1 = helper(cx, h)
+                    c2, r2 = helper(w - cx, h)
+                    if c1 + c2 > best_cnt:
+                        best_cnt = c1 + c2
+                        shifted_r2 = [(rx + cx, ry, rw, rh) for (rx, ry, rw, rh) in r2]
+                        best_rects = r1 + shifted_r2
+
+                cut_y = set()
+                y = IH
+                while y < h: cut_y.add(y); y += IH
+                y = IW
+                while y < h: cut_y.add(y); y += IW
+
+                for cy in cut_y:
+                    c1, r1 = helper(w, cy)
+                    c2, r2 = helper(w, h - cy)
+                    if c1 + c2 > best_cnt:
+                        best_cnt = c1 + c2
+                        shifted_r2 = [(rx, ry + cy, rw, rh) for (rx, ry, rw, rh) in r2]
+                        best_rects = r1 + shifted_r2
+
+                memo[key] = (best_cnt, best_rects)
+                return memo[key]
+
+            return helper(SW, SH)
 
         if turn_over and not is_formatting:
             half_w = lim_w / 2
-            res1, res2 = get_layout(half_w, lim_h, pw, ph), get_layout(half_w, lim_h, ph, pw)
-            best = list(res1 if res1[0] >= res2[0] else res2)
-            best[0] = int(best[0] * 2)
+            cnt1, rects1 = solve_guillotine(half_w, lim_h, pw, ph)
+            rects2 = [(rx + half_w, ry, rw, rh) for (rx, ry, rw, rh) in rects1]
+            best_cnt = cnt1 * 2
+            best_rects = rects1 + rects2
         else:
-            res1, res2 = get_layout(lim_w, lim_h, pw, ph), get_layout(lim_w, lim_h, ph, pw)
-            best = res1 if res1[0] >= res2[0] else res2
+            best_cnt, best_rects = solve_guillotine(lim_w, lim_h, pw, ph)
 
-        st.success(f"Брой в листа: {int(best[0])}")
-        area_pct = (int(best[0]) * pw * ph) / (psw_mm * psh_mm) * 100
+        st.success(f"Брой в листа: {int(best_cnt)}")
+        area_pct = (best_cnt * pw * ph) / (psw_mm * psh_mm) * 100
         st.info(f"Използваема площ: {area_pct:.1f}%")
         
-        # Рисуване на графиката
         st.subheader("Визуализация на монтажа:")
-        draw_matplotlib_scheme(psw_mm, psh_mm, best, is_formatting, (turn_over and not is_formatting), grip_mm, full_choice)
+        draw_matplotlib_scheme(psw_mm, psh_mm, best_rects, is_formatting, (turn_over and not is_formatting), grip_mm, full_choice)
         
     except Exception as e:
         st.error(f"Невалидни данни или грешка при изчислението: {e}")
