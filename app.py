@@ -20,7 +20,7 @@ DATA = {
 
 NAMED_SIZES = {"himiya": "43x61", "плаки": "48.7x33"}
 
-st.title("🖨️ Печатен Калкулатор (Гилотинно разкрояване)")
+st.title("🖨️ Печатен Калкулатор")
 
 full_choice = st.selectbox("1. Избор на хартия:", list(DATA.keys()))
 
